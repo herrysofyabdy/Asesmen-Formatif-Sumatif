@@ -126,7 +126,21 @@ code { font-size: .92em; background: var(--soft); border: 1px solid var(--line);
 body[data-view="vGuru"] .wrap { max-width: 1180px; }
 body[data-view="vBeranda"] .wrap { max-width: 900px; }
 body[data-view="vUjian"] .wrap { max-width: 1080px; padding-block: 0 56px; }
-body[data-view="vUjian"] { -webkit-user-select: none; user-select: none; }
+body[data-view="vUjian"] { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+body[data-view="vUjian"] img { -webkit-user-drag: none; }
+/* Tanda air identitas siswa di atas soal: foto atau tangkapan layar soal menunjukkan siapa pemiliknya */
+.tandaair { position: fixed; inset: 0; z-index: 7; pointer-events: none; background-repeat: repeat; }
+/* Tirai: menutup soal saat tombol tangkapan layar ditekan atau halaman kehilangan fokus */
+.tirai { position: fixed; inset: 0; z-index: 70; background: var(--bg); display: grid; place-items: center; text-align: center;
+  padding: max(24px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(24px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.tirai > div { max-width: 420px; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.tirai svg { width: 44px; height: 44px; color: var(--bad); }
+.tirai b { font-size: 18px; }
+.tirai p { margin: 0; color: var(--muted); }
+@media print {
+  body[data-view="vUjian"] > * { display: none !important; }
+  body[data-view="vUjian"]::after { content: "Halaman ujian tidak dapat dicetak."; display: block; padding: 48px 24px; font: 600 18px/1.4 system-ui, sans-serif; color: #000; background: #fff; }
+}
 section.view { display: flex; flex-direction: column; gap: 18px; }
 
 .demo { background: var(--warn-soft); color: var(--ink); font-size: 13px; border-bottom: 1px solid var(--line); }
@@ -649,6 +663,9 @@ pre.ocr { white-space: pre-wrap; font-size: 13px; max-height: 260px; overflow: a
   <section id="vGuru" class="gview" hidden></section>
 </main>
 
+<div id="tandaAir" class="tandaair" aria-hidden="true" hidden></div>
+<div id="tirai" class="tirai" role="alert" hidden><div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M4 4l16 16"/></svg>
+  <b>Tangkapan layar tidak diizinkan</b><p id="tiraiP">Soal ditutup selama ujian berlangsung. Lepaskan tombol untuk melanjutkan.</p></div></div>
 <div id="overlay" class="overlay" hidden></div>
 <div id="toast" class="toast" role="status" hidden></div>
 
@@ -2394,6 +2411,9 @@ var ImporSiswa = (function () {
         '<ol class="rules">' +
           '<li>Ujian hanya dapat dikerjakan <b>satu kali</b>. Setelah selesai, kamu tidak bisa mengerjakan ulang.</li>' +
           '<li>Selama ujian, jangan pindah tab, membuka aplikasi lain, keluar dari layar penuh (misalnya menekan Esc), atau menutup halaman. ' + aturanKeluar + '</li>' +
+          '<li><b>Tangkapan layar tidak diizinkan.</b> Soal tertutup saat tombol tangkapan layar ditekan, dan tombol Print Screen ' +
+            (u.toleransi === 0 ? 'membuat ujian langsung selesai' : 'dihitung sebagai pelanggaran') + '. Nama dan kode loginmu tampil samar di layar soal, ' +
+            'jadi foto atau tangkapan layar soal akan menunjukkan siapa pemiliknya.</li>' +
           '<li>Jawaban tersimpan otomatis. Jawaban boleh diganti selama waktu masih ada.</li>' +
           '<li>Saat waktu habis, jawaban dikumpulkan otomatis dan nilaimu langsung muncul.</li>' +
           '<li>Sebelum mulai, tutup pemberitahuan di bagian atas layar dan aktifkan mode Jangan Ganggu di ponselmu.</li>' +
@@ -2640,8 +2660,76 @@ var ImporSiswa = (function () {
 
   /* ---------- Penjaga: keluar halaman = selesai ---------- */
   var Guard = { on: false, away: false, fs: false, t0: 0 };
-  Guard.start = function () { Guard.on = true; Guard.away = false; Guard.t0 = Date.now(); };
-  Guard.stop = function () { Guard.on = false; keluarLayarPenuh(); };
+  Guard.start = function () { Guard.on = true; Guard.away = false; Guard.t0 = Date.now(); pasangTandaAir(); };
+  Guard.stop = function () { Guard.on = false; keluarLayarPenuh(); lepasTandaAir(); tirai(false); };
+
+  /* ---------- Tangkapan layar ----------
+   * Halaman web tidak bisa mematikan tombol tangkapan layar milik sistem (Print Screen, Win+Shift+S, tombol ponsel).
+   * Yang bisa dilakukan: (1) tanda air nama & kode login siswa di atas soal, (2) soal ditutup tirai selama tombol
+   * Windows/Command/Alt/Ctrl+Shift ditekan dan saat halaman kehilangan fokus, (3) tombol Print Screen menghapus isi
+   * papan klip dan dicatat sebagai pelanggaran, (4) halaman ujian tidak bisa dicetak. */
+  function pasangTandaAir() {
+    var el = $('#tandaAir'), s = (S.beranda && S.beranda.siswa) || {};
+    if (!el) return;
+    var d = new Date(), dua = function (n) { return (n < 10 ? '0' : '') + n; };
+    var waktu = dua(d.getDate()) + '/' + dua(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + dua(d.getHours()) + ':' + dua(d.getMinutes());
+    var warna = (getComputedStyle(document.documentElement).getPropertyValue('--ink') || '#000').trim() || '#000';
+    var xe = function (t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); };
+    var b1 = xe([s.nama, s.kelas].filter(Boolean).join(' · ')), b2 = xe((s.username || '') + ' · ' + waktu);
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="380" height="230"><g transform="rotate(-24 190 115)" fill="' + xe(warna) + '" fill-opacity="0.085" ' +
+      'font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" text-anchor="middle">' +
+      '<text x="190" y="108" font-size="17" font-weight="600">' + b1 + '</text><text x="190" y="132" font-size="13">' + b2 + '</text></g></svg>';
+    el.style.backgroundImage = 'url("data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg) + '")';
+    el.setAttribute('data-siswa', s.username || '');
+    el.hidden = false;
+  }
+  function lepasTandaAir() { var el = $('#tandaAir'); if (el) { el.hidden = true; el.style.backgroundImage = ''; } }
+  var tiraiT = 0;
+  function tirai(buka, pesan) {
+    var el = $('#tirai');
+    if (!el) return;
+    clearTimeout(tiraiT);
+    if (buka) {
+      $('#tiraiP').textContent = pesan || 'Soal ditutup selama tombol ditekan. Lepaskan tombol untuk melanjutkan.';
+      el.hidden = false;
+    } else el.hidden = true;
+  }
+  function tutupTiraiNanti(ms) { clearTimeout(tiraiT); tiraiT = setTimeout(function () { tirai(false); }, ms || 500); }
+  function kosongkanPapanKlip() {
+    try {
+      var p = navigator.clipboard && navigator.clipboard.writeText('Tangkapan layar tidak diizinkan selama ujian.');
+      if (p && p.catch) p.catch(function () { });
+    } catch (e) { /* abaikan */ }
+  }
+  function tombolTangkap(e) {
+    return e.key === 'PrintScreen' || e.code === 'PrintScreen' || e.keyCode === 44;
+  }
+  function tombolRawan(e) {
+    // Tombol awal pintasan tangkapan layar: Windows (Win+Shift+S, Win+PrtSc), Mac (Cmd+Shift+3/4/5), Alt+PrtSc, Chromebook (Ctrl+Shift+…)
+    return e.key === 'Meta' || e.key === 'OS' || e.metaKey || e.key === 'Alt' || (e.ctrlKey && e.shiftKey);
+  }
+  document.addEventListener('keydown', function (e) {
+    if (!Guard.on || S.ending) return;
+    if (tombolTangkap(e)) { e.preventDefault(); tirai(true, 'Tombol Print Screen tidak boleh dipakai selama ujian.'); return; }
+    if (tombolRawan(e)) tirai(true);
+  }, true);
+  document.addEventListener('keyup', function (e) {
+    if (!Guard.on || S.ending) return;
+    if (tombolTangkap(e)) {
+      e.preventDefault();
+      kosongkanPapanKlip();
+      tirai(true, 'Tombol Print Screen tidak boleh dipakai selama ujian.');
+      langgar('tangkap');
+      tutupTiraiNanti(1500);
+      return;
+    }
+    if (!e.metaKey && !e.altKey && !(e.ctrlKey && e.shiftKey)) tutupTiraiNanti(400);
+  }, true);
+  window.addEventListener('blur', function () { if (Guard.on && !S.ending) tirai(true, 'Soal ditutup karena halaman ujian tidak aktif.'); });
+  window.addEventListener('focus', function () { if (Guard.on) tutupTiraiNanti(300); });
+  document.addEventListener('dragstart', function (e) { if (Guard.on) e.preventDefault(); });
+  window.addEventListener('beforeprint', function () { if (Guard.on) tirai(true, 'Halaman ujian tidak dapat dicetak.'); });
+  window.addEventListener('afterprint', function () { if (Guard.on) tutupTiraiNanti(300); });
   function fsEl() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
   function masukLayarPenuh() {
     var el = document.documentElement;
@@ -2665,12 +2753,13 @@ var ImporSiswa = (function () {
     if (ex.pelanggaran + 1 > ex.toleransi) {
       S.ending = true;
       hentikanUjianLokal();
-      busy('Kamu keluar dari halaman ujian. Ujian dihentikan dan nilai sedang dihitung…');
+      busy(jenis === 'tangkap' ? 'Kamu mencoba mengambil tangkapan layar. Ujian dihentikan dan nilai sedang dihitung…'
+        : 'Kamu keluar dari halaman ujian. Ujian dihentikan dan nilai sedang dihitung…');
       kirimAkhir(function () { return api('apiLanggar', S.token, ex.id, jenis, jaw); });
       return;
     }
     ex.pelanggaran++;
-    tampilPeringatan();
+    tampilPeringatan(jenis);
     api('apiLanggar', S.token, ex.id, jenis, jaw).then(function (r) {
       if (!S.exam || S.ending) return;
       if (r.ok && r.selesai) return akhiri(r.hasil);
@@ -2678,11 +2767,11 @@ var ImporSiswa = (function () {
       else if (r.code === 'RESET') { hentikanUjianLokal(); S.exam = null; muatBeranda(function () { kembaliKeUjian(S.item.id); }); }
     });
   }
-  function tampilPeringatan() {
+  function tampilPeringatan(jenis) {
     var ex = S.exam, p = ex.pelanggaran, t = ex.toleransi, sisa = t - p;
-    openModal('<p class="eyebrow bad">Peringatan ' + p + ' dari ' + t + '</p><h3>Kamu keluar dari halaman ujian</h3>' +
+    openModal('<p class="eyebrow bad">Peringatan ' + p + ' dari ' + t + '</p><h3>' + (jenis === 'tangkap' ? 'Kamu mencoba mengambil tangkapan layar' : 'Kamu keluar dari halaman ujian') + '</h3>' +
       '<p>Kejadian ini tercatat dan terlihat oleh guru. ' +
-      (sisa > 0 ? 'Masih ada ' + sisa + ' peringatan lagi sebelum ujian otomatis selesai.' : 'Ini peringatan terakhir. Jika keluar sekali lagi, ujian langsung selesai.') +
+      (sisa > 0 ? 'Masih ada ' + sisa + ' peringatan lagi sebelum ujian otomatis selesai.' : 'Ini peringatan terakhir. Jika melanggar sekali lagi, ujian langsung selesai.') +
       '</p><div class="m-act"><button type="button" class="btn primary" data-act="kembali" data-autofocus>Kembali ke soal</button></div>',
       { cls: 'warnbox', kind: 'warn' });
   }
