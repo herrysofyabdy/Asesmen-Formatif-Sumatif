@@ -376,6 +376,7 @@ label { cursor: pointer; }
 .m-act { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; margin-top: 6px; }
 .m-act .btn { flex: 1 1 140px; }
 .spin { width: 36px; height: 36px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+.spin.kecil { display: inline-block; width: 16px; height: 16px; border-width: 2px; vertical-align: -3px; margin-right: 6px; }
 .copybox { font: 500 13px/1.5 var(--f-mono); min-height: 160px; }
 .toast { position: fixed; left: 50%; transform: translateX(-50%); z-index: 60; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); max-width: calc(100% - 32px); width: max-content; background: var(--ink); color: var(--paper); padding: 11px 16px; border-radius: 12px; font-size: 14px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 10px; }
 .toast::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
@@ -535,6 +536,19 @@ input[readonly] { background: var(--soft); color: var(--muted); }
 .tbl th, .tbl td { text-align: left; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .tbl th { font-size: 12px; color: var(--muted); font-weight: 600; }
 .tbl td.mono { font-family: var(--f-mono); }
+/* Impor anggota kelas */
+.is-sum { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; font-size: 14.5px; }
+.isopsi { display: flex; flex-wrap: wrap; gap: 12px 22px; align-items: flex-end; }
+.isopsi .f { flex: 1 1 260px; min-width: 0; }
+.isopsi .baris2 { display: flex; gap: 8px; }
+.isopsi .baris2 input { flex: 1 1 auto; min-width: 0; }
+.istbl td { vertical-align: middle; }
+.istbl td input:not([type="checkbox"]) { width: 100%; min-width: 150px; padding: 6px 8px; font-size: 14px; }
+.istbl td.n { color: var(--muted); font-family: var(--f-mono); }
+.istbl tr.off td:not(:first-child) { opacity: .45; }
+.istbl .pill { white-space: nowrap; }
+.isakhir { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+pre.ocr { white-space: pre-wrap; font-size: 13px; max-height: 260px; overflow: auto; background: var(--soft); padding: 10px 12px; border-radius: 10px; margin: 8px 0 0; }
 .qlist > li { padding: 16px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
 .qlist > li.salah { box-shadow: inset 4px 0 0 var(--bad); }
 .qi-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -1619,6 +1633,357 @@ var Impor = (function () {
   return {
     uraiBaris: uraiBaris, uraiTeks: uraiTeks, bacaDocx: bacaDocx, dariItem: dariItem,
     siapkanGambar: siapkanGambar, dataUrl: dataUrl, _pecahOpsi: pecahOpsi, _klasifikasi: klasifikasi, _angkaKe: angkaKe
+  };
+})();
+</script>
+<script>
+/* ==================================================================
+ *  IMPOR ANGGOTA KELAS
+ *  Membaca daftar siswa dari Excel (.xlsx / .csv), Word (.docx), atau teks
+ *  (hasil membaca gambar atau tempelan). Semua dikerjakan di peramban.
+ *  Hasil pengurai: { baris: [{ nama, kelas, nis, nisn, username, password }], kelas: 'tebakan dari judul', catatan: [] }
+ * ================================================================== */
+var ImporSiswa = (function () {
+  'use strict';
+
+  var TAK_TAMPAK = new RegExp('[' + String.fromCharCode(0x200b, 0x200c, 0x200d, 0x2060, 0xfeff, 0xad) + ']', 'g');
+  function bersih(t) { return String(t === undefined || t === null ? '' : t).replace(TAK_TAMPAK, '').replace(/\s+/g, ' ').trim(); }
+  function kunci(t) { return bersih(t).toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+  /* ---------- kepala tabel ---------- */
+  var KEPALA = [
+    ['nama', /^(nama|namalengkap|namasiswa|namapesertadidik|namapeserta|namamurid|pesertadidik|namalengkapsiswa|namalengkappesertadidik|siswa|murid)$/],
+    ['kelas', /^(kelas|rombel|rombonganbelajar|kelasrombel|rombelsaatini|namarombel)$/],
+    ['nisn', /^nisn$/],
+    ['nis', /^(nis|nipd|noinduk|nomorinduk|noinduksiswa|nomorinduksiswa|nislokal|induk|nisnisn|nisnisn)$/],
+    ['username', /^(username|kodelogin|user|akun|login|idlogin|usernamelogin)$/],
+    ['password', /^(password|katasandi|sandi|pass|pin)$/]
+  ];
+  function petaKepala(row) {
+    var p = {};
+    (row || []).forEach(function (sel, i) {
+      var k = kunci(sel);
+      if (!k) return;
+      for (var j = 0; j < KEPALA.length; j++) {
+        if (p[KEPALA[j][0]] === undefined && KEPALA[j][1].test(k)) { p[KEPALA[j][0]] = i; break; }
+      }
+    });
+    return p;
+  }
+
+  /* ---------- pengenal nama ---------- */
+  var BUKAN_NAMA = /^(no|nomor|nama|jumlah|total|keterangan|ket|laki|perempuan|l\/p|jenis kelamin|tanda tangan|ttd|paraf|nip|nuptk|nisn|nis|nipd|mengetahui|kepala sekolah|wali kelas|guru|daftar|tahun pelajaran|semester|kelas|rombel|halaman|dicetak|sekolah|smk|smkn|smp|smpn|sma|sman|sd|sdn|mts|man|madrasah|yayasan|dinas|pemerintah|provinsi|kabupaten|kecamatan|alamat|jl|jalan|telp|telepon|email|website|absensi|presensi|tanggal|mata pelajaran|anggota)\b/i;
+  var AKHIR_DAFTAR = /^(mengetahui|kepala sekolah|wali kelas|tanda tangan|dicetak pada|catatan)\b/i;
+  function pantasNama(t) {
+    t = bersih(t);
+    if (t.length < 2 || t.length > 80) return false;
+    var huruf = (t.match(/[A-Za-z]/g) || []).length, isi = t.replace(/\s/g, '').length;
+    if (huruf < 2 || huruf / isi < 0.6) return false;
+    return !BUKAN_NAMA.test(t);
+  }
+  // "1. Andi", "01) Andi", "No 3 Andi" -> "Andi"
+  function buangNomor(t) { return bersih(t).replace(/^(no\.?\s*)?\d{1,3}\s*[.):-]?\s+(?=[^\d\s])/i, '').replace(/^\d{1,3}[.)]\s*(?=[A-Za-z])/, ''); }
+
+  function rapikanNama(t) {
+    t = bersih(t);
+    if (/[a-z]/.test(t)) return t;
+    return t.toLowerCase().replace(/(^|[\s\-.(])([a-z])/g, function (_, a, b) { return a + b.toUpperCase(); })
+      .replace(/\b(Bin|Binti)\b/g, function (x) { return x.toLowerCase(); });
+  }
+  var ROMAWI = /^(XII|XI|X|IX|VIII|VII|VI|V|IV|III|II|I)$/i;
+  function rapikanKelas(t) {
+    return bersih(t).split(' ').map(function (w) {
+      if (ROMAWI.test(w)) return w.toUpperCase();
+      if (/\d/.test(w)) return w.toUpperCase();
+      if (w.length <= 4 && w === w.toUpperCase()) return w;
+      return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+    }).join(' ');
+  }
+  /** Mencari "Kelas X Kuliner" / "Rombel : X AKL 1" di judul atau kop daftar. */
+  function tebakKelas(baris) {
+    for (var i = 0; i < baris.length; i++) {
+      var m = /\b(?:kelas|rombel|rombongan belajar)\s*[:=-]?\s*((?:XII|XI|X|IX|VIII|VII|VI|IV|V|III|II|I|\d{1,2})\b(?:[ .\-/]+[A-Za-z0-9]+){0,3})/i.exec(bersih(baris[i]));
+      if (!m) continue;
+      var kata = m[1].split(/[ ]+/), ambil = [];
+      for (var j = 0; j < kata.length; j++) {
+        if (j > 0 && /^(tahun|tp|t\.p|ta|semester|smt|wali|sekolah|smk|smkn|smp|smpn|sma|sman|sd|sdn|mts|ma|tapel|th|periode|jurusan|program)$/i.test(kata[j].replace(/[.:]+$/, ''))) break;
+        if (/^\d{4}/.test(kata[j])) break;
+        ambil.push(kata[j]);
+      }
+      var k = ambil.join(' ').replace(/[ .\-/:]+$/, '');
+      if (k) return rapikanKelas(k);
+    }
+    return '';
+  }
+
+  function angkaId(v) {
+    var t = bersih(v).replace(/[\s.'-]/g, '');
+    return /^\d{4,12}$/.test(t) ? t : '';
+  }
+
+  /* ---------- tabel (Excel, Word, CSV, tempelan berkolom) ---------- */
+  function dariTabel(rows) {
+    rows = (rows || []).map(function (r) { return (r || []).map(bersih); });
+    var hIdx = -1, peta = null, i;
+    for (i = 0; i < Math.min(rows.length, 30) && hIdx < 0; i++) {
+      var p = petaKepala(rows[i]);
+      if (p.nama !== undefined) { hIdx = i; peta = p; }
+    }
+    var judul = rows.slice(0, hIdx > 0 ? hIdx : Math.min(rows.length, 8)).map(function (r) { return r.filter(Boolean).join(' '); });
+    var catatan = [];
+    if (hIdx < 0) {
+      peta = tebakKolom(rows);
+      if (peta.nama === undefined) return { baris: [], kelas: tebakKelas(judul), catatan: ['Kolom nama tidak ditemukan.'], kepala: false };
+      catatan.push('Judul kolom tidak ditemukan; kolom nama ditebak dari isinya.');
+    }
+    var baris = [];
+    for (i = hIdx + 1; i < rows.length; i++) {
+      var r = rows[i], mentah = r[peta.nama] || '';
+      if (baris.length && AKHIR_DAFTAR.test(mentah)) break;
+      var nama = buangNomor(mentah);
+      if (!pantasNama(nama)) continue;
+      var nisn = peta.nisn !== undefined ? angkaId(r[peta.nisn]) : '';
+      if (nisn && nisn.length >= 8 && nisn.length < 10) nisn = ('0000000000' + nisn).slice(-10);   // Excel membuang angka 0 di depan NISN
+      var nis = peta.nis !== undefined ? angkaId(r[peta.nis]) : '';
+      if (nis && !nisn && nis.length === 10) { nisn = nis; nis = ''; }
+      baris.push({
+        nama: nama, kelas: peta.kelas !== undefined ? bersih(r[peta.kelas]) : '', nisn: nisn, nis: nis,
+        username: peta.username !== undefined ? bersih(r[peta.username]) : '', password: peta.password !== undefined ? bersih(r[peta.password]) : ''
+      });
+    }
+    return { baris: baris, kelas: tebakKelas(judul), catatan: catatan, kepala: hIdx >= 0 };
+  }
+  function tebakKolom(rows) {
+    var skor = [], idKol = [];
+    rows.forEach(function (r) {
+      r.forEach(function (v, i) {
+        if (pantasNama(buangNomor(v)) && /[A-Za-z]{2,}/.test(v)) skor[i] = (skor[i] || 0) + (/\s/.test(bersih(v)) ? 2 : 1);
+        if (angkaId(v)) idKol[i] = (idKol[i] || 0) + 1;
+      });
+    });
+    var p = {}, best = 0;
+    skor.forEach(function (s, i) { if (s > best) { best = s; p.nama = i; } });
+    idKol.forEach(function (n, i) { if (i !== p.nama && n >= rows.length * 0.5 && p.nis === undefined) p.nis = i; });
+    return p;
+  }
+
+  /* ---------- teks (hasil baca gambar, tempelan, paragraf Word) ---------- */
+  function pisahKolom(lines) {
+    var n = lines.length, tab = 0, tk = 0, koma = 0;
+    lines.forEach(function (l) { if (/\t/.test(l)) tab++; if (/;/.test(l)) tk++; if (/,/.test(l)) koma++; });
+    if (tab >= Math.max(1, n * 0.5)) return '\t';
+    if (tk >= Math.max(1, n * 0.5)) return ';';
+    if (koma >= Math.max(1, n * 0.6)) return ',';
+    return '';
+  }
+  function dariTeks(teks) {
+    var lines = String(teks || '').replace(/\r\n?/g, '\n').split('\n').map(function (l) { return l.replace(TAK_TAMPAK, ''); })
+      .filter(function (l) { return l.trim(); });
+    var pemisah = pisahKolom(lines);
+    if (pemisah) {
+      var rows = lines.map(function (l) {
+        var r = l.split(pemisah);
+        return r.length === 1 && /[\t;,]/.test(l) ? l.split(/[\t;,]/) : r;
+      });
+      var t = dariTabel(rows);
+      // Tanpa judul kolom: "Nama, Kelas" (format lama) — kolom lain yang bukan angka dipakai sebagai kelas.
+      if (!t.kepala) {
+        t.catatan = [];
+        var kolNama = tebakKolom(rows.map(function (r) { return r.map(bersih); })).nama;
+        t.baris = [];
+        rows.forEach(function (r) {
+          var nm = buangNomor(r[kolNama]);
+          if (!pantasNama(nm)) return;
+          var lain = r.filter(function (x, i) { return i !== kolNama; }).map(bersih);
+          var id = lain.map(angkaId).filter(Boolean)[0] || '';
+          var kls = lain.filter(function (x) { return x && !angkaId(x) && !/^(L|P|laki-laki|perempuan)$/i.test(x); })[0] || '';
+          t.baris.push({ nama: nm, kelas: kls, nisn: id.length === 10 ? id : '', nis: id.length === 10 ? '' : id, username: '', password: '' });
+        });
+      }
+      return t;
+    }
+    var judul = [], baris = [], idSendiri = [];
+    for (var i = 0; i < lines.length; i++) {
+      var asli = bersih(lines[i]);
+      if (baris.length && AKHIR_DAFTAR.test(asli)) break;
+      var t2 = buangNomor(asli), nisn = '', nis = '';
+      t2 = t2.replace(/\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b/g, ' ');                       // tanggal lahir
+      t2 = t2.replace(/\b\d{4,12}\b/g, function (d) { if (d.length === 10 && !nisn) nisn = d; else if (!nis) nis = d; return ' '; });
+      t2 = buangNomor(bersih(t2.replace(/[|_*•·©®]+/g, ' ')));
+      var lp = /^(.*?[A-Za-z].*?)\s+(L|P)(?=\s|$)(.*)$/.exec(t2);                         // "ANDI PRATAMA L Muara Bulian" -> nama sebelum L/P
+      if (lp) t2 = lp[1];
+      t2 = bersih(t2.replace(/\b(laki[\s-]*laki|perempuan)\b.*$/i, ''));
+      if (t2.indexOf(',') > 0) t2 = bersih(t2.split(',')[0]);
+      if (!t2 && (nisn || nis)) { idSendiri.push(nisn || nis); continue; }
+      if (!pantasNama(t2) || tebakKelas([asli])) { if (!baris.length) judul.push(asli); continue; }
+      baris.push({ nama: t2, kelas: '', nisn: nisn, nis: nis, username: '', password: '' });
+    }
+    // Hasil baca gambar kadang kolom per kolom: semua NISN dulu, lalu semua nama. Pasangkan jika jumlahnya sama.
+    var catatan = [];
+    if (idSendiri.length && idSendiri.length === baris.length && baris.every(function (b) { return !b.nisn && !b.nis; })) {
+      baris.forEach(function (b, k) { if (idSendiri[k].length === 10) b.nisn = idSendiri[k]; else b.nis = idSendiri[k]; });
+    }
+    return { baris: baris, kelas: tebakKelas(judul.concat(lines.slice(0, 6))), catatan: catatan };
+  }
+
+  /** Baris tabel apa saja: pakai judul kolom jika ada; jika tidak, baca seperti teks berkolom (nama, kelas, NISN ditebak). */
+  function dariBaris(rows) {
+    var h = dariTabel(rows);
+    if (h.kepala) return h;
+    var t = dariTeks((rows || []).map(function (r) { return (r || []).map(bersih).join('\t'); }).join('\n'));
+    if (!t.baris.length) return h;
+    if (!t.kelas) t.kelas = h.kelas;
+    return t;
+  }
+
+  /* ---------- CSV ---------- */
+  function uraiCsv(teks) {
+    teks = String(teks || '');
+    if (teks.charCodeAt(0) === 0xfeff) teks = teks.slice(1);
+    var awal = teks.split(/\r?\n/).slice(0, 10).join('\n');
+    var pm = (awal.match(/;/g) || []).length > (awal.match(/,/g) || []).length ? ';' : ((awal.match(/\t/g) || []).length > (awal.match(/,/g) || []).length ? '\t' : ',');
+    var rows = [], row = [], sel = '', kutip = false;
+    for (var i = 0; i < teks.length; i++) {
+      var c = teks[i];
+      if (kutip) {
+        if (c === '"') { if (teks[i + 1] === '"') { sel += '"'; i++; } else kutip = false; } else sel += c;
+      } else if (c === '"') kutip = true;
+      else if (c === pm) { row.push(sel); sel = ''; }
+      else if (c === '\n' || c === '\r') { if (c === '\r' && teks[i + 1] === '\n') i++; row.push(sel); rows.push(row); row = []; sel = ''; }
+      else sel += c;
+    }
+    if (sel || row.length) { row.push(sel); rows.push(row); }
+    return rows;
+  }
+
+  /* ---------- XML Office ---------- */
+  function xml(teks) {
+    var d = new DOMParser().parseFromString(teks, 'application/xml');
+    if (d.getElementsByTagName('parsererror').length) throw new Error('Isi berkas tidak bisa dibaca.');
+    return d;
+  }
+  function semua(el, nama) { return Array.prototype.slice.call(el.getElementsByTagNameNS('*', nama)); }
+  function anak(el, nama) { return Array.prototype.filter.call(el.childNodes, function (n) { return n.nodeType === 1 && n.localName === nama; }); }
+  function bacaZip(buf) {
+    if (typeof JSZip === 'undefined') return Promise.reject(new Error('Pembaca berkas belum dimuat. Periksa koneksi internet lalu coba lagi.'));
+    return JSZip.loadAsync(buf).catch(function () { throw new Error('Berkas tidak bisa dibuka. Pastikan berkasnya .xlsx atau .docx yang tidak rusak.'); });
+  }
+  function isiZip(zip, jalur) { var f = zip.file(jalur); return f ? f.async('string') : Promise.resolve(''); }
+
+  /** Excel .xlsx -> [{ nama: 'Sheet1', rows: [[...], ...] }] */
+  function bacaXlsx(buf) {
+    return bacaZip(buf).then(function (zip) {
+      if (!zip.file('xl/workbook.xml')) throw new Error('Berkas ini bukan buku kerja Excel (.xlsx).');
+      return Promise.all([isiZip(zip, 'xl/workbook.xml'), isiZip(zip, 'xl/_rels/workbook.xml.rels'), isiZip(zip, 'xl/sharedStrings.xml')]).then(function (a) {
+        var rel = {}, ss = [];
+        if (a[1]) semua(xml(a[1]), 'Relationship').forEach(function (r) { rel[r.getAttribute('Id')] = r.getAttribute('Target'); });
+        if (a[2]) semua(xml(a[2]), 'si').forEach(function (si) {
+          ss.push(semua(si, 't').filter(function (t) { return !t.parentNode || t.parentNode.localName !== 'rPh'; }).map(function (t) { return t.textContent; }).join(''));
+        });
+        var lembar = semua(xml(a[0]), 'sheet').map(function (s, i) {
+          var id = s.getAttribute('r:id') || s.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+          var tgt = rel[id] || ('worksheets/sheet' + (i + 1) + '.xml');
+          var jalur = tgt.charAt(0) === '/' ? tgt.slice(1) : 'xl/' + tgt.replace(/^\.\//, '');
+          return { nama: s.getAttribute('name') || ('Lembar ' + (i + 1)), jalur: jalur, tersembunyi: s.getAttribute('state') === 'hidden' || s.getAttribute('state') === 'veryHidden' };
+        }).filter(function (s) { return !s.tersembunyi; });
+        return Promise.all(lembar.map(function (s) {
+          return isiZip(zip, s.jalur).then(function (x) { return { nama: s.nama, rows: x ? barisLembar(xml(x), ss) : [] }; });
+        }));
+      });
+    });
+  }
+  function kolomKe(ref) {
+    var m = /^([A-Z]+)/.exec(ref || ''), n = 0;
+    if (!m) return -1;
+    for (var i = 0; i < m[1].length; i++) n = n * 26 + (m[1].charCodeAt(i) - 64);
+    return n - 1;
+  }
+  function barisLembar(dom, ss) {
+    var rows = [];
+    semua(dom, 'row').forEach(function (r) {
+      var ri = Number(r.getAttribute('r')) - 1;
+      if (!(ri >= 0)) ri = rows.length;
+      var arr = [];
+      anak(r, 'c').forEach(function (c, k) {
+        var col = kolomKe(c.getAttribute('r'));
+        if (col < 0) col = k;
+        var t = c.getAttribute('t'), v = anak(c, 'v')[0], val = '';
+        if (t === 's') val = ss[Number(v ? v.textContent : -1)] || '';
+        else if (t === 'inlineStr') val = semua(c, 't').map(function (x) { return x.textContent; }).join('');
+        else val = v ? v.textContent : '';
+        if (t !== 's' && t !== 'inlineStr' && t !== 'str' && /^-?\d+(\.\d+)?(e[+-]?\d+)?$/i.test(val)) {
+          var n = Number(val);
+          val = /e/i.test(val) && Math.abs(n) >= 1 ? n.toFixed(0) : String(n);
+        }
+        arr[col] = val;
+      });
+      for (var j = 0; j < arr.length; j++) if (arr[j] === undefined) arr[j] = '';
+      rows[ri] = arr;
+    });
+    for (var i = 0; i < rows.length; i++) if (!rows[i]) rows[i] = [];
+    return rows;
+  }
+
+  /** Word .docx -> { tabel: [rows...], paragraf: ['...'] } (urutan dokumen) */
+  function bacaDocx(buf) {
+    return bacaZip(buf).then(function (zip) {
+      if (!zip.file('word/document.xml')) throw new Error('Berkas ini bukan dokumen Word (.docx).');
+      return isiZip(zip, 'word/document.xml');
+    }).then(function (x) {
+      var body = semua(xml(x), 'body')[0], out = { tabel: [], paragraf: [] };
+      (function jalan(el) {
+        Array.prototype.forEach.call(el.childNodes, function (n) {
+          if (n.nodeType !== 1) return;
+          if (n.localName === 'p') out.paragraf.push(teksP(n));
+          else if (n.localName === 'tbl') out.tabel.push(barisTabel(n));
+          else if (n.localName === 'sdt' || n.localName === 'sdtContent' || n.localName === 'customXml') jalan(n);
+        });
+      })(body);
+      return out;
+    });
+  }
+  function teksP(p) {
+    var s = '';
+    (function jalan(el) {
+      Array.prototype.forEach.call(el.childNodes, function (n) {
+        if (n.nodeType !== 1) return;
+        if (n.localName === 't') s += n.textContent;
+        else if (n.localName === 'tab') s += '\t';
+        else if (n.localName === 'br' || n.localName === 'cr') s += ' ';
+        else if (n.localName !== 'instrText' && n.localName !== 'delText' && n.localName !== 'tbl') jalan(n);
+      });
+    })(p);
+    return s;
+  }
+  function barisTabel(tbl) {
+    return anak(tbl, 'tr').map(function (tr) {
+      var arr = [];
+      anak(tr, 'tc').forEach(function (tc) {
+        arr.push(anak(tc, 'p').map(teksP).join(' '));
+        var pr = anak(tc, 'tcPr')[0], span = pr && anak(pr, 'gridSpan')[0];
+        var n = span ? Number(span.getAttribute('w:val') || span.getAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val')) || 1 : 1;
+        for (var i = 1; i < n; i++) arr.push('');
+      });
+      return arr;
+    });
+  }
+  /** Memilih tabel Word yang berisi daftar nama; jika tidak ada, membaca paragraf seperti teks biasa. */
+  function dariDokumen(d) {
+    var terbaik = null;
+    d.tabel.forEach(function (rows) {
+      var h = dariBaris(rows);
+      if (h.baris.length && (!terbaik || h.baris.length > terbaik.baris.length)) terbaik = h;
+    });
+    var kelas = tebakKelas(d.paragraf.slice(0, 15));
+    if (terbaik) { if (!terbaik.kelas) terbaik.kelas = kelas; return terbaik; }
+    var t = dariTeks(d.paragraf.join('\n'));
+    if (!t.kelas) t.kelas = kelas;
+    return t;
+  }
+
+  return {
+    dariTabel: dariTabel, dariTeks: dariTeks, dariBaris: dariBaris, dariDokumen: dariDokumen, uraiCsv: uraiCsv,
+    bacaXlsx: bacaXlsx, bacaDocx: bacaDocx, rapikanNama: rapikanNama, rapikanKelas: rapikanKelas, tebakKelas: tebakKelas, pantasNama: pantasNama
   };
 })();
 </script>
@@ -3368,12 +3733,9 @@ var Impor = (function () {
           '<label class="f" for="tUser"><span>Kode login <em>(opsional)</em></span><input id="tUser" maxlength="30" autocapitalize="none" spellcheck="false"></label>' +
           '<label class="f" for="tPass"><span>Kata sandi <em>(opsional)</em></span><input id="tPass" maxlength="30" autocapitalize="none" spellcheck="false"></label>' +
           '<button class="btn primary" type="submit">Tambah siswa</button>' +
-        '</form>' +
-        '<details class="bulk"><summary>Tambah banyak sekaligus</summary>' +
-          '<p class="muted small">Satu siswa per baris dengan format <code>Nama, Kelas</code>. Bisa ditempel langsung dari Excel atau Google Sheet (kolom Nama lalu Kelas).</p>' +
-          '<textarea id="tBanyak" rows="6" placeholder="Andi Pratama, X Kuliner&#10;Siti Rahmawati, X AKL 1"></textarea>' +
-          '<button class="btn primary" type="button" data-act="tambahBanyak">Buat akun</button>' +
-        '</details><div id="tHasil">' + renderDibuat() + '</div></section>' +
+        '</form></section>' +
+      '<section class="panel" id="pImpor">' + htmlImporSiswa() + '</section>' +
+      (G.dibuat ? '<section class="panel" id="tHasil">' + renderDibuat() + '</section>' : '') +
       '<section class="panel"><div class="ph"><h2>Daftar akun <span class="muted">(' + G.siswa.length + ')</span></h2>' +
         '<div class="ph-a"><select id="fKelasSiswa" aria-label="Saring kelas"><option value="">Semua kelas</option>' + Object.keys(kelas).sort().map(function (k) {
           return '<option value="' + esc(k) + '"' + (G.kelasSiswa === k ? ' selected' : '') + '>' + esc(k) + ' (' + kelas[k] + ')</option>'; }).join('') + '</select>' +
@@ -3420,6 +3782,212 @@ var Impor = (function () {
     };
     if (!p) return manual();
     p.then(function () { toast(pesan || 'Disalin.', 'ok'); }, manual);
+  }
+  /* ----- Impor anggota kelas: Excel, Word, gambar, atau tempelan ----- */
+  function daftarKelasAda() {
+    var ada = {};
+    (G.siswa || []).forEach(function (s) { if (s.kelas) ada[s.kelas] = true; });
+    return Object.keys(ada).sort();
+  }
+  function kunciNama(n) { return String(n || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+  /** Ejaan kelas disamakan dengan kelas yang sudah ada (mis. "X KULINER" -> "X Kuliner"). */
+  function cocokkanKelas(k) {
+    k = String(k || '').replace(/\s+/g, ' ').trim();
+    if (!k) return '';
+    var sama = daftarKelasAda().filter(function (x) { return kunciNama(x) === kunciNama(k); })[0];
+    return sama || ImporSiswa.rapikanKelas(k);
+  }
+  function htmlImporSiswa() {
+    var I = G.imporSiswa;
+    var kepala = '<div><h2>Impor anggota kelas</h2><p class="muted small">Dari berkas Excel (.xlsx, .csv), Word (.docx), atau gambar daftar siswa (foto atau tangkapan layar). ' +
+      'Hasilnya diperiksa dulu sebelum akun dibuat. Kode login dan kata sandi dibuat otomatis.</p></div>';
+    if (!I || I.tahap === 'pilih') {
+      return kepala +
+        (I && I.galat ? '<div class="notice warn">' + esc(I.galat) + '</div>' : '') +
+        (I && I.teksGambar ? '<details class="format"><summary>Teks hasil membaca gambar</summary><pre class="ocr">' + esc(I.teksGambar) + '</pre></details>' : '') +
+        '<div class="fgrid two">' +
+          '<label class="f" for="isKelas"><span>Kelas</span><input id="isKelas" maxlength="40" list="dlKelasS" placeholder="Mis. X Kuliner" value="' + esc(I ? I.kelas || '' : '') + '">' +
+            '<small>Dipakai untuk siswa yang kelasnya tidak tertulis di berkas. Boleh dikosongkan jika kelas tertulis di judul daftar.</small></label>' +
+          '<div class="f"><span>Berkas daftar siswa</span>' +
+            '<label class="drop" id="isDrop" for="isFile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>' +
+              '<b>Pilih atau seret berkas ke sini</b><span class="muted small">Excel · Word · Gambar (JPG/PNG)</span>' +
+              '<input type="file" id="isFile" accept=".xlsx,.xlsm,.csv,.docx,.xls,.doc,image/*" hidden></label></div>' +
+        '</div>' +
+        '<details class="bulk"' + (I && I.teks ? ' open' : '') + '><summary>Atau tempel daftar nama</summary>' +
+          '<p class="muted small">Satu siswa per baris. Bisa ditempel dari Excel, Google Sheet, Word, atau pesan WhatsApp. Nomor urut, NISN, dan L/P dikenali otomatis. Format <code>Nama, Kelas</code> juga bisa.</p>' +
+          '<textarea id="tBanyak" rows="6" placeholder="1. Andi Pratama&#10;2. Siti Rahmawati&#10;Budi Santoso, X AKL 1">' + esc(I && I.teks || '') + '</textarea>' +
+          '<button class="btn" type="button" data-act="bacaTempelSiswa">Periksa daftar</button>' +
+        '</details>';
+    }
+    if (I.tahap === 'baca') return kepala + '<p class="muted" role="status"><span class="spin kecil" aria-hidden="true"></span> ' + esc(I.pesan) + '</p>';
+    var B = I.baris, n = B.filter(function (b) { return b.pilih; }).length;
+    var sumber = { gambar: 'gambar', tempelan: 'teks tempelan' }[I.sumber] || I.sumber;
+    return kepala +
+      '<div class="is-sum"><span><b>' + B.length + '</b> nama terbaca dari ' + esc(sumber) + '</span>' +
+        (I.namaBerkas ? '<span class="muted small">' + esc(I.namaBerkas) + '</span>' : '') +
+        (I.kelasTebak ? '<span class="small">Kelas di judul daftar: <b>' + esc(I.kelasTebak) + '</b></span>' : '') + '</div>' +
+      (I.sumber === 'gambar' ? '<div class="notice warn small">Hasil membaca gambar bisa keliru, terutama tulisan tangan atau foto yang miring. Periksa ejaan setiap nama sebelum membuat akun.</div>' : '') +
+      (I.catatan && I.catatan.length ? '<p class="muted small">' + esc(I.catatan.join(' ')) + '</p>' : '') +
+      '<div class="isopsi">' +
+        (I.lembar.length > 1 ? '<label class="f" for="isLembar"><span>Lembar Excel</span><select id="isLembar">' + I.lembar.map(function (l, i) {
+            return '<option value="' + i + '"' + (I.pilihLembar === String(i) ? ' selected' : '') + '>' + esc(l.nama) + ' (' + l.hasil.baris.length + ' siswa)</option>';
+          }).join('') + '<option value="semua"' + (I.pilihLembar === 'semua' ? ' selected' : '') + '>Semua lembar (kelas = nama lembar)</option></select></label>' : '') +
+        '<label class="f" for="isKelasSemua"><span>Kelas untuk semua</span><span class="baris2"><input id="isKelasSemua" maxlength="40" list="dlKelasS" placeholder="Mis. X Kuliner" value="' + esc(I.kelas || '') + '">' +
+          '<button type="button" class="btn sm" data-act="isTerapkanKelas">Terapkan</button></span></label>' +
+      '</div>' +
+      '<div class="isopsi">' +
+        '<label class="check" for="isRapikan"><input type="checkbox" id="isRapikan"' + (I.rapikan ? ' checked' : '') + '> <span>Rapikan huruf kapital (ANDI PRATAMA → Andi Pratama)</span></label>' +
+        (I.adaId ? '<label class="check" for="isPakaiId"><input type="checkbox" id="isPakaiId"' + (I.pakaiId ? ' checked' : '') + '> <span>Pakai NISN/NIS sebagai kode login</span></label>' : '') +
+      '</div>' +
+      '<div class="tbl"><table class="istbl"><thead><tr><th><input type="checkbox" id="isSemua" aria-label="Pilih semua"' + (n === B.length ? ' checked' : '') + '></th><th>No</th><th>Nama lengkap</th><th>Kelas</th>' +
+        (I.adaId ? '<th>NISN/NIS</th>' : '') + '<th>Keterangan</th></tr></thead><tbody>' +
+        B.map(function (b, i) {
+          return '<tr' + (b.pilih ? '' : ' class="off"') + '><td><input type="checkbox" data-is-pilih="' + i + '"' + (b.pilih ? ' checked' : '') + ' aria-label="Pilih baris ' + (i + 1) + '"></td>' +
+            '<td class="n">' + (i + 1) + '</td>' +
+            '<td><input data-is-nama="' + i + '" maxlength="80" value="' + esc(b.nama) + '" aria-label="Nama siswa baris ' + (i + 1) + '"></td>' +
+            '<td><input data-is-kelas="' + i + '" maxlength="40" list="dlKelasS" value="' + esc(b.kelas) + '" aria-label="Kelas baris ' + (i + 1) + '"></td>' +
+            (I.adaId ? '<td class="mono">' + esc(b.id) + '</td>' : '') +
+            '<td data-is-ket="' + i + '">' + htmlKetSiswa(b) + '</td></tr>';
+        }).join('') + '</tbody></table></div>' +
+      (I.teksGambar ? '<details class="format"><summary>Teks hasil membaca gambar</summary><pre class="ocr">' + esc(I.teksGambar) + '</pre></details>' : '') +
+      '<div class="isakhir"><button type="button" class="btn" data-act="isBatal">Batal</button><button type="button" class="btn" data-act="isUlang">Pilih berkas lain</button>' +
+        '<button type="button" class="btn primary" data-act="isBuat" id="isBuat"' + (n ? '' : ' disabled') + '>Buat ' + n + ' akun</button></div>';
+  }
+  function htmlKetSiswa(b) { return b.ket ? '<span class="pill ' + (/^Periksa/.test(b.ket) ? '' : 'warn') + '">' + esc(b.ket) + '</span>' : ''; }
+  function renderImporSiswa() {
+    var el = $('#pImpor');
+    if (el) el.innerHTML = htmlImporSiswa(); else renderSiswa();
+  }
+  function perbaruiPilihSiswa() {
+    var I = G.imporSiswa, n = I.baris.filter(function (b) { return b.pilih; }).length, t = $('#isBuat'), a = $('#isSemua');
+    if (t) { t.textContent = 'Buat ' + n + ' akun'; t.disabled = !n; }
+    if (a) { a.checked = n === I.baris.length; a.indeterminate = n > 0 && n < I.baris.length; }
+  }
+  function bacaBuffer(file, teks) {
+    return new Promise(function (ok, gagal) {
+      var fr = new FileReader();
+      fr.onload = function () { ok(fr.result); };
+      fr.onerror = function () { gagal(new Error('Berkas tidak bisa dibaca.')); };
+      if (teks) fr.readAsText(file); else fr.readAsArrayBuffer(file);
+    });
+  }
+  /** Gambar diperkecil (sisi terpanjang ±2200 px, di bawah 2 MB) agar cepat terkirim dan bisa dibaca Google Drive. */
+  function kecilkanGambar(file) {
+    return bacaBuffer(file, false).then(function (buf) {
+      return new Promise(function (ok, gagal) {
+        var url = URL.createObjectURL(new Blob([buf], { type: file.type || 'image/jpeg' })), img = new Image();
+        img.onerror = function () { URL.revokeObjectURL(url); gagal(new Error('Gambar ini tidak bisa dibuka. Gunakan foto JPG atau PNG.')); };
+        img.onload = function () {
+          var w = img.naturalWidth, h = img.naturalHeight, skala = Math.min(1, 2200 / Math.max(w, h)), mutu = 0.9, hasil = '';
+          var cv = document.createElement('canvas');
+          for (var i = 0; i < 5; i++) {
+            cv.width = Math.max(1, Math.round(w * skala)); cv.height = Math.max(1, Math.round(h * skala));
+            var c = cv.getContext('2d');
+            c.fillStyle = '#ffffff'; c.fillRect(0, 0, cv.width, cv.height);
+            c.drawImage(img, 0, 0, cv.width, cv.height);
+            hasil = cv.toDataURL('image/jpeg', mutu);
+            if (hasil.length < 2.6e6) break;
+            skala *= 0.8; mutu = Math.max(0.7, mutu - 0.05);
+          }
+          URL.revokeObjectURL(url);
+          ok(hasil);
+        };
+        img.src = url;
+      });
+    });
+  }
+  function bacaBerkasSiswa(file) {
+    if (!file) return;
+    var kelas = $('#isKelas') ? $('#isKelas').value.trim() : ((G.imporSiswa && G.imporSiswa.kelas) || '');
+    var ext = ((/\.([a-z0-9]+)$/i.exec(file.name || '') || [])[1] || '').toLowerCase();
+    var jenis = /^image\//.test(file.type) && !/hei[cf]/.test(file.type) || /^(jpe?g|png|webp|gif|bmp)$/.test(ext) ? 'gambar'
+      : ext === 'docx' ? 'Word' : (ext === 'xlsx' || ext === 'xlsm') ? 'Excel' : (ext === 'csv' || ext === 'txt') ? 'CSV' : '';
+    var galat = function (pesan, teksGambar) { G.imporSiswa = { tahap: 'pilih', kelas: kelas, galat: pesan, teksGambar: teksGambar }; renderImporSiswa(); };
+    if (!jenis) {
+      return galat(ext === 'xls' ? 'Berkas .xls (Excel lama) belum bisa dibaca. Buka di Excel, pilih Simpan Sebagai › Buku Kerja Excel (.xlsx), lalu impor lagi.'
+        : ext === 'doc' ? 'Berkas .doc (Word lama) belum bisa dibaca. Buka di Word, pilih Simpan Sebagai › Dokumen Word (.docx), lalu impor lagi.'
+        : /^hei[cf]$/.test(ext) || /hei[cf]/.test(file.type) ? 'Foto HEIC dari iPhone belum bisa dibaca. Kirim ulang sebagai JPG atau ambil tangkapan layarnya, lalu impor lagi.'
+        : 'Pilih berkas Excel (.xlsx atau .csv), Word (.docx), atau gambar (JPG atau PNG).');
+    }
+    if (file.size > 20 * 1024 * 1024) return galat('Berkas terlalu besar (lebih dari 20 MB).');
+    G.imporSiswa = { tahap: 'baca', kelas: kelas, kelasManual: !!kelas, namaBerkas: file.name, sumber: jenis,
+      pesan: jenis === 'gambar' ? 'Membaca tulisan di gambar dengan Google Drive… biasanya 5–20 detik.' : 'Membaca berkas ' + jenis + '…' };
+    renderImporSiswa();
+    var p;
+    if (jenis === 'gambar') {
+      p = kecilkanGambar(file).then(function (url) { return api('apiGuruBacaGambar', S.token, { dataUrl: url }); }).then(function (r) {
+        if (!r.ok) { if (r.code === 'SESI') { keluar(r.msg); return null; } throw new Error(r.msg); }
+        G.imporSiswa.teksGambar = r.teks;
+        return [{ nama: '', hasil: ImporSiswa.dariTeks(r.teks) }];
+      });
+    } else if (jenis === 'Excel') {
+      p = muatJSZip().then(function () { return bacaBuffer(file); }).then(ImporSiswa.bacaXlsx).then(function (lembar) {
+        return lembar.map(function (l) { return { nama: l.nama, hasil: ImporSiswa.dariBaris(l.rows) }; });
+      });
+    } else if (jenis === 'Word') {
+      p = muatJSZip().then(function () { return bacaBuffer(file); }).then(ImporSiswa.bacaDocx).then(function (d) { return [{ nama: '', hasil: ImporSiswa.dariDokumen(d) }]; });
+    } else {
+      p = bacaBuffer(file, true).then(function (t) { return [{ nama: '', hasil: ImporSiswa.dariBaris(ImporSiswa.uraiCsv(t)) }]; });
+    }
+    p.then(function (lembar) { if (lembar && G.imporSiswa && G.imporSiswa.tahap === 'baca') siapkanPeriksaSiswa(lembar); })
+      .catch(function (e) { galat(e.message || 'Berkas tidak bisa dibaca.', G.imporSiswa && G.imporSiswa.teksGambar); });
+  }
+  function siapkanPeriksaSiswa(lembar) {
+    var I = G.imporSiswa;
+    I.lembar = lembar.filter(function (l) { return l.hasil.baris.length; });
+    if (!I.lembar.length) {
+      G.imporSiswa = { tahap: 'pilih', kelas: I.kelas, teks: I.teks, teksGambar: I.teksGambar,
+        galat: 'Tidak ada nama siswa yang terbaca. ' + (I.sumber === 'gambar' ? 'Pastikan gambar tajam, terang, dan tidak miring, atau potong gambar hanya pada bagian daftar nama.'
+          : I.sumber === 'tempelan' ? 'Tulis satu nama per baris.' : 'Pastikan daftar memiliki kolom berjudul "Nama", atau satu nama per baris.') };
+      return renderImporSiswa();
+    }
+    I.pilihLembar = '0'; I.rapikan = true; I.pakaiId = false;
+    pilihLembarSiswa();
+    I.tahap = 'periksa';
+    renderImporSiswa();
+  }
+  function pilihLembarSiswa() {
+    var I = G.imporSiswa, l = I.lembar[Number(I.pilihLembar) || 0];
+    var tebak = I.pilihLembar === 'semua' ? '' : (l.hasil.kelas || (l.nama ? ImporSiswa.tebakKelas(['kelas ' + l.nama]) : ''));
+    I.kelasTebak = tebak ? cocokkanKelas(tebak) : '';
+    if (!I.kelasManual) I.kelas = I.kelasTebak;
+    bangunBarisSiswa();
+  }
+  function bangunBarisSiswa() {
+    var I = G.imporSiswa, semuaL = I.pilihLembar === 'semua';
+    var dipakai = semuaL ? I.lembar : [I.lembar[Number(I.pilihLembar) || 0]];
+    I.baris = [];
+    dipakai.forEach(function (l) {
+      var kelasL = semuaL && l.nama ? cocokkanKelas(l.hasil.kelas || l.nama) : '';
+      l.hasil.baris.forEach(function (b) {
+        I.baris.push({ asli: b.nama, nama: I.rapikan ? ImporSiswa.rapikanNama(b.nama) : b.nama, kelas: b.kelas ? cocokkanKelas(b.kelas) : (kelasL || I.kelas || ''),
+          id: b.nisn || b.nis || '', username: b.username || '', password: b.password || '', pilih: true });
+      });
+    });
+    I.adaId = I.baris.some(function (b) { return b.id; });
+    I.catatan = dipakai.reduce(function (a, l) { return a.concat(l.hasil.catatan); }, []);
+    cekBarisSiswa(true);
+  }
+  function cekBarisSiswa(awal) {
+    var I = G.imporSiswa, ada = {}, lihat = {};
+    (G.siswa || []).forEach(function (s) { ada[kunciNama(s.nama) + '|' + kunciNama(s.kelas)] = s.username; });
+    I.baris.forEach(function (b) {
+      var k = kunciNama(b.nama) + '|' + kunciNama(b.kelas);
+      b.ket = !kunciNama(b.nama) ? 'Nama kosong' : ada[k] ? 'Sudah punya akun (' + ada[k] + ')' : lihat[k] ? 'Nama ganda di daftar'
+        : /[0-9|\\/_@#=+<>{}\[\]]/.test(b.nama) ? 'Periksa ejaan' : '';
+      lihat[k] = true;
+      if (awal && b.ket && !/^Periksa/.test(b.ket)) b.pilih = false;
+    });
+  }
+  function buatAkunImpor() {
+    var I = G.imporSiswa, pilih = I.baris.filter(function (b) { return b.pilih; });
+    if (!pilih.length) return toast('Centang siswa yang akan dibuatkan akun.', 'warn');
+    if (pilih.some(function (b) { return !b.nama.trim(); })) return toast('Ada nama yang masih kosong. Isi atau hilangkan centangnya.', 'warn');
+    var tanpaKelas = pilih.filter(function (b) { return !b.kelas.trim(); }).length;
+    if (tanpaKelas) { toast(tanpaKelas + ' siswa belum memiliki kelas. Isi kelas lalu tekan Terapkan.', 'warn'); var k = $('#isKelasSemua'); if (k) k.focus(); return; }
+    tambahSiswa(pilih.map(function (b) {
+      return { nama: b.nama.trim(), kelas: b.kelas.trim(), username: I.pakaiId && b.id ? b.id : (b.username || ''), password: b.password || '' };
+    }), function () { G.imporSiswa = null; });
   }
   function tambahSiswa(daftar, onOk) {
     if (!daftar.length) { toast('Isi nama siswa terlebih dahulu.', 'warn'); return; }
@@ -3502,6 +4070,23 @@ var Impor = (function () {
     else if (t.id === 'cbPwGuru') { G.pwGuru = t.checked; simpanFormGuru(); renderAkunGuru(); }
     else if (t.id === 'fKelasSiswa') { G.kelasSiswa = t.value; renderSiswaList(); }
     else if (t.id === 'impFile') bacaBerkasWord(t.files && t.files[0]);
+    else if (t.id === 'isFile') { bacaBerkasSiswa(t.files && t.files[0]); t.value = ''; }
+    else if (t.hasAttribute && t.hasAttribute('data-is-pilih')) {
+      var bp = G.imporSiswa.baris[Number(t.getAttribute('data-is-pilih'))];
+      bp.pilih = t.checked; t.closest('tr').classList.toggle('off', !t.checked); perbaruiPilihSiswa();
+    }
+    else if (t.id === 'isSemua') { G.imporSiswa.baris.forEach(function (b) { b.pilih = t.checked; }); renderImporSiswa(); }
+    else if (t.id === 'isRapikan') {
+      G.imporSiswa.rapikan = t.checked;
+      G.imporSiswa.baris.forEach(function (b) { if (!b.diubah) b.nama = t.checked ? ImporSiswa.rapikanNama(b.asli) : b.asli; });
+      renderImporSiswa();
+    }
+    else if (t.id === 'isPakaiId') G.imporSiswa.pakaiId = t.checked;
+    else if (t.id === 'isLembar') { G.imporSiswa.pilihLembar = t.value; pilihLembarSiswa(); renderImporSiswa(); }
+    else if (t.hasAttribute && (t.hasAttribute('data-is-nama') || t.hasAttribute('data-is-kelas'))) {
+      cekBarisSiswa(false);
+      G.imporSiswa.baris.forEach(function (b, i) { var c = $('[data-is-ket="' + i + '"]'); if (c) c.innerHTML = htmlKetSiswa(b); });
+    }
     else if (t.id === 'sqGambar') { unggahGambarSoal(t.files && t.files[0]); t.value = ''; }
     else if (t.name === 'sqKunci') pratinjauSoal();
     else if (t.id === 'sqTingkat') { perbaruiTingkatForm(); pratinjauSoal(); }
@@ -3515,6 +4100,8 @@ var Impor = (function () {
     if (t.id === 'pCari') { G.cari = t.value; renderPantauList(); }
     else if (/^sq(Teks|O[A-E]|Ideal|Kata|Bobot)$/.test(t.id)) { if (t.id === 'sqTeks') perbaruiTingkatForm(); pratinjauSoal(); }
     else if (t.id === 'impTeks' && G.impor) G.impor.teks = t.value;
+    else if (t.hasAttribute('data-is-nama')) { var bn = G.imporSiswa.baris[Number(t.getAttribute('data-is-nama'))]; bn.nama = t.value; bn.diubah = true; }
+    else if (t.hasAttribute('data-is-kelas')) G.imporSiswa.baris[Number(t.getAttribute('data-is-kelas'))].kelas = t.value;
   });
   // Seret berkas Word ke mana saja di halaman impor. Di luar halaman impor, berkas yang dijatuhkan diabaikan
   // agar peramban tidak membuka berkas itu dan meninggalkan panel guru.
@@ -3523,18 +4110,19 @@ var Impor = (function () {
     window.addEventListener(ev, function (e) {
       if (!bawaBerkas(e)) return;
       e.preventDefault();
-      var d = $('#impDrop');
+      var d = $('#impDrop') || $('#isDrop');
       if (d) d.classList.add('over');
     });
   });
   window.addEventListener('dragleave', function (e) {
-    var d = $('#impDrop');
+    var d = $('#impDrop') || $('#isDrop');
     if (d && !e.relatedTarget) d.classList.remove('over');
   });
   window.addEventListener('drop', function (e) {
     if (!bawaBerkas(e)) return;
     e.preventDefault();
-    var d = $('#impDrop');
+    var d = $('#impDrop'), ds = $('#isDrop');
+    if (ds && e.dataTransfer.files[0]) { ds.classList.remove('over'); return bacaBerkasSiswa(e.dataTransfer.files[0]); }
     if (!d) return;
     d.classList.remove('over');
     if (e.dataTransfer.files[0]) bacaBerkasWord(e.dataTransfer.files[0]);
@@ -3873,10 +4461,23 @@ var Impor = (function () {
       case 'ulangImpor': var sumber = G.impor.sumber, teks = G.impor.teks; bersihkanImpor(); G.impor = { tahap: 'pilih', sumber: sumber, teks: teks }; renderImpor(); break;
       case 'bacaTeks': bacaTeksTempel(); break;
       case 'simpanImpor': simpanImpor(); break;
-      case 'tambahBanyak':
-        var baris = $('#tBanyak').value.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
-        tambahSiswa(baris.map(function (l) { var b = l.split(/\t|;|,/).map(function (x) { return x.trim(); }); return { nama: b[0], kelas: b[1] || '' }; }));
+      case 'bacaTempelSiswa':
+        var tTempel = $('#tBanyak').value;
+        if (!tTempel.trim()) { toast('Tempel daftar nama siswa terlebih dahulu.', 'warn'); break; }
+        var kTempel = $('#isKelas') ? $('#isKelas').value.trim() : '';
+        G.imporSiswa = { tahap: 'baca', kelas: kTempel, kelasManual: !!kTempel, sumber: 'tempelan', teks: tTempel };
+        siapkanPeriksaSiswa([{ nama: '', hasil: ImporSiswa.dariTeks(tTempel) }]);
         break;
+      case 'isTerapkanKelas':
+        var kSemua = cocokkanKelas($('#isKelasSemua').value);
+        G.imporSiswa.kelas = kSemua; G.imporSiswa.kelasManual = true;
+        G.imporSiswa.baris.forEach(function (b) { b.kelas = kSemua; });
+        cekBarisSiswa(false); renderImporSiswa();
+        toast(kSemua ? 'Kelas semua siswa: ' + kSemua + '.' : 'Kelas dikosongkan.', 'ok');
+        break;
+      case 'isBuat': buatAkunImpor(); break;
+      case 'isBatal': G.imporSiswa = null; renderImporSiswa(); break;
+      case 'isUlang': G.imporSiswa = { tahap: 'pilih', kelas: G.imporSiswa.kelasManual ? G.imporSiswa.kelas : '' }; renderImporSiswa(); break;
       case 'hapusSiswa':
         confirmBox({ title: 'Hapus akun siswa?', body: 'Akun <code>' + esc(u) + '</code> tidak bisa dipakai masuk lagi. Nilai yang sudah ada tetap tersimpan.', ok: 'Hapus akun', tone: 'danger' }).then(function (ya) {
           if (!ya) return;
